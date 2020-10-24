@@ -25,7 +25,7 @@ use rg3d::{
     utils::translate_event,
 };
 
-use crate::level_generator::Level;
+use crate::level_generator::{Field, Level, RoomOptions};
 
 mod level_generator;
 
@@ -84,13 +84,24 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
         .unwrap();
 
     // create level
-    let level = Level::new(100, 100, 9, 10, 8, 30);
+    let level = Level::create_dungeon(
+        99,
+        99,
+        RoomOptions {
+            max_rooms: 9,
+            max_attempts: 125,
+            min_size: 7,
+            max_size: 30,
+        },
+        Field::Floor,
+        Field::Corridor,
+    );
 
     let mut tile_count = 0;
 
     for x in 0..level.map.len() {
         for y in 0..level.map[0].len() {
-            if level.map[x][y] == 0 {
+            if level.map[x][y] == Field::Empty {
                 continue;
             }
 
@@ -125,6 +136,8 @@ struct InputController {
     move_forward: bool,
     move_backward: bool,
     run: bool,
+    jump: bool,
+    crouch: bool,
 }
 
 fn main() {
@@ -172,6 +185,8 @@ fn main() {
         move_forward: false,
         move_backward: false,
         run: false,
+        jump: false,
+        crouch: false,
     };
 
     event_loop.run(move |event, _, control_flow| {
@@ -228,6 +243,13 @@ fn main() {
 
                     offset.x *= speed;
                     offset.z *= speed;
+
+                    if input_controller.jump {
+                        offset.y += speed;
+                    }
+                    if input_controller.crouch {
+                        offset.y -= speed;
+                    }
 
                     let pos = scene.graph[camera_handle].local_transform().position();
                     scene.graph[camera_handle]
@@ -295,6 +317,12 @@ fn main() {
                                 }
                                 VirtualKeyCode::LShift => {
                                     input_controller.run = input.state == ElementState::Pressed
+                                }
+                                VirtualKeyCode::Space => {
+                                    input_controller.jump = input.state == ElementState::Pressed
+                                }
+                                VirtualKeyCode::C => {
+                                    input_controller.crouch = input.state == ElementState::Pressed
                                 }
                                 VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                                 _ => (),

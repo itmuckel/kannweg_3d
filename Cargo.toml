@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 rg3d = { path = "../rg3d" }
 rand = "0.7.3"
+num = "0.3.0"
 
 [profile.dev.package."*"]
 opt-level = 3
