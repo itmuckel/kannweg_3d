@@ -72,7 +72,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     scene.graph[camera_handle]
         .local_transform_mut()
-        .offset(Vec3::new(20.0 * 50.0, 10.0, 20.0 * 50.0));
+        .offset(Vec3::new(20.0 * 25.0, 10.0, 20.0 * 25.0));
 
     let model_resource = resource_manager
         .request_model("assets/items.fbx")
@@ -85,13 +85,13 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     // create level
     let level = Level::create_dungeon(
-        99,
-        99,
+        63,
+        59,
         RoomOptions {
-            max_rooms: 9,
+            max_rooms: 12,
             max_attempts: 125,
             min_size: 7,
-            max_size: 30,
+            max_size: 15,
         },
         Field::Floor,
         Field::Corridor,
@@ -158,6 +158,7 @@ fn main() {
     }
 
     engine.resource_manager.state().set_textures_path("assets");
+    engine.get_window().set_cursor_visible(false);
 
     let debug_text = create_ui(&mut engine.user_interface.build_ctx());
 
