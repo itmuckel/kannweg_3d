@@ -74,6 +74,8 @@ where
 
         level.add_doors(corridor_identifier);
 
+        level.remove_dead_ends();
+
         level
     }
 
@@ -133,7 +135,7 @@ where
         }
     }
 
-    fn get_neighbours(&self, cell: (usize, usize)) -> Vec<(usize, usize)> {
+    fn get_neighbours(&self, cell: (usize, usize), distance: usize) -> Vec<(usize, usize)> {
         let x = cell.0;
         let y = cell.1;
 
@@ -143,20 +145,20 @@ where
 
         let mut neighbours = Vec::new();
         // north
-        if y >= 2 {
-            neighbours.push((x, y - 2))
+        if y >= distance {
+            neighbours.push((x, y - distance))
         }
         // south
-        if in_bounds(x, y + 2) {
-            neighbours.push((x, y + 2));
+        if in_bounds(x, y + distance) {
+            neighbours.push((x, y + distance));
         }
         // west
-        if x >= 2 {
-            neighbours.push((x - 2, y));
+        if x >= distance {
+            neighbours.push((x - distance, y));
         }
         // east
-        if in_bounds(x + 2, y) {
-            neighbours.push((x + 2, y));
+        if in_bounds(x + distance, y) {
+            neighbours.push((x + distance, y));
         }
 
         neighbours
@@ -189,7 +191,7 @@ where
                 while !visited_cells.is_empty() {
                     let cur_cell = visited_cells.pop().unwrap();
 
-                    let neighbours = self.get_neighbours(cur_cell);
+                    let neighbours = self.get_neighbours(cur_cell, 2);
 
                     if neighbours.is_empty() {
                         continue;
@@ -308,8 +310,29 @@ where
                 }
             }
         }
+    }
 
-        // TODO: Remove dead ends
+    fn remove_dead_ends(&mut self) {
+        let corridors = self.corridors.clone();
+        let mut corridors: Vec<(usize, usize)> =
+            corridors.into_iter().flat_map(|v| v.into_iter()).collect();
+
+        loop {
+            let mut corridors_changed = false;
+
+            for i in (0..(corridors.len() - 1)).rev() {
+                let cur_cell = corridors[i];
+                if self.get_neighbours(cur_cell, 1).len() == 3 {
+                    self.map[cur_cell.0][cur_cell.1] = T::default();
+                    corridors.remove(i);
+                    corridors_changed = true;
+                }
+            }
+
+            if !corridors_changed {
+                break;
+            }
+        }
     }
 }
 
