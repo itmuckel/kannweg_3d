@@ -25,8 +25,8 @@ impl Default for Field {
 }
 
 pub struct Level<T: Default + Eq + Copy> {
-    rooms: Vec<Vec<(usize, usize)>>,
-    corridors: Vec<Vec<(usize, usize)>>,
+    pub rooms: Vec<Vec<(usize, usize)>>,
+    pub corridors: Vec<Vec<(usize, usize)>>,
     pub map: Vec<Vec<T>>,
 }
 
@@ -74,7 +74,12 @@ where
 
         level.add_doors(corridor_identifier);
 
-        level.remove_dead_ends();
+        loop {
+            let removed = level.remove_dead_ends();
+            if removed == 0 {
+                break;
+            }
+        }
 
         level
     }
@@ -101,6 +106,10 @@ where
                 let y = gen_odd_range(0, height - 1);
                 let y_extent = gen_even_range(min_size, max_size);
                 let y_extent = min(y_extent, height - y - 2);
+
+                if x_extent < 2 || y_extent < 2 {
+                    continue 'attempts;
+                }
 
                 // try to place the room...
                 for x_check in x..=(x + x_extent) {
@@ -139,9 +148,7 @@ where
         let x = cell.0;
         let y = cell.1;
 
-        let map = self.map.clone();
-
-        let in_bounds = |x: usize, y: usize| x < map.len() && y < map[0].len();
+        let in_bounds = |x: usize, y: usize| x < self.width() && y < self.height();
 
         let mut neighbours = Vec::new();
         // north
@@ -229,6 +236,7 @@ where
 
                     visited_cells.push(rand_neighbour);
                     corridor.push(rand_neighbour);
+                    corridor.push((wall_to_remove.0 as usize, wall_to_remove.1 as usize));
                 }
 
                 corridors.push(corridor);
@@ -291,6 +299,7 @@ where
                     }
 
                     self.map[x][y] = door;
+                    self.corridors[0].push((x, y));
 
                     let mut region_b_content = regions[region_b.unwrap()].clone();
                     regions[region_a.unwrap()].append(&mut region_b_content);
@@ -312,27 +321,29 @@ where
         }
     }
 
-    fn remove_dead_ends(&mut self) {
-        let corridors = self.corridors.clone();
-        let mut corridors: Vec<(usize, usize)> =
-            corridors.into_iter().flat_map(|v| v.into_iter()).collect();
+    fn remove_dead_ends(&mut self) -> usize {
+        let mut corridors = self.corridors.clone();
 
-        loop {
-            let mut corridors_changed = false;
-
-            for i in (0..(corridors.len() - 1)).rev() {
-                let cur_cell = corridors[i];
-                if self.get_neighbours(cur_cell, 1).len() == 3 {
+        let mut removed = 0;
+        for corridor in corridors.iter_mut() {
+            for l in (0..corridor.len()).rev() {
+                let cur_cell = &corridor[l];
+                let neighbours = self.get_neighbours(*cur_cell, 1);
+                let neighbour_count = neighbours
+                    .iter()
+                    .filter(|(x, y)| self.map[*x][*y] == T::default())
+                    .count();
+                if neighbour_count == 3 {
                     self.map[cur_cell.0][cur_cell.1] = T::default();
-                    corridors.remove(i);
-                    corridors_changed = true;
+                    corridor.remove(l);
+                    removed += 1;
                 }
             }
-
-            if !corridors_changed {
-                break;
-            }
         }
+
+        self.corridors = corridors;
+
+        removed
     }
 }
 

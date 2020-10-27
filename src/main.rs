@@ -82,13 +82,17 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
         .request_model("assets/floor.fbx")
         .await
         .unwrap();
+    let corridor_resource = resource_manager
+        .request_model("assets/corridor.fbx")
+        .await
+        .unwrap();
 
     // create level
     let level = Level::create_dungeon(
         63,
         59,
         RoomOptions {
-            max_rooms: 12,
+            max_rooms: 15,
             max_attempts: 125,
             min_size: 7,
             max_size: 15,
@@ -99,6 +103,8 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     let mut tile_count = 0;
 
+    // let corridors = level.corridors.clone().iter().flat_map(|v| v.iter().cloned()).collect::<Vec<(usize, usize)>>();
+
     for x in 0..level.map.len() {
         for y in 0..level.map[0].len() {
             if level.map[x][y] == Field::Empty {
@@ -107,9 +113,13 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
             tile_count += 1;
 
-            let floor_handle = floor_resource.instantiate_geometry(&mut scene);
+            let handle = match level.map[x][y] {
+                Field::Floor => floor_resource.instantiate_geometry(&mut scene),
+                Field::Corridor => corridor_resource.instantiate_geometry(&mut scene),
+                _ => floor_resource.instantiate_geometry(&mut scene), // should be something else...
+            };
 
-            scene.graph[floor_handle]
+            scene.graph[handle]
                 .local_transform_mut()
                 .set_scale(Vec3::new(0.2, 0.2, 0.2))
                 .offset(Vec3::new(20.0 * x as f32, 0.0, 20.0 * y as f32));
