@@ -9,6 +9,7 @@ use rg3d::engine::resource_manager::TextureImportOptions;
 use rg3d::gui::message::MessageDirection;
 use rg3d::renderer::QualitySettings;
 use rg3d::resource::texture::{TextureMagnificationFilter, TextureMinificationFilter};
+use rg3d::scene::light::{BaseLightBuilder, PointLightBuilder};
 use rg3d::{
     core::{
         color::Color,
@@ -39,9 +40,10 @@ fn create_ui(ctx: &mut BuildContext) -> Handle<UiNode> {
     TextBuilder::new(WidgetBuilder::new()).build(ctx)
 }
 
-const PLAYER_SPEED: f32 = 0.7f32;
-const EXTRA_RUN_SPEED: f32 = 0.7f32;
-const MOUSE_SPEED: f32 = 0.15f32;
+const PLAYER_SPEED: f32 = 0.7;
+const EXTRA_RUN_SPEED: f32 = 0.7;
+const MOUSE_SPEED: f32 = 0.15;
+const TILE_OFFSET: f32 = 20.0;
 
 struct GameScene {
     scene: Scene,
@@ -72,12 +74,8 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     scene.graph[camera_handle]
         .local_transform_mut()
-        .offset(Vec3::new(20.0 * 25.0, 10.0, 20.0 * 25.0));
+        .offset(Vec3::new(TILE_OFFSET * 25.0, 10.0, TILE_OFFSET * 25.0));
 
-    let model_resource = resource_manager
-        .request_model("assets/items.fbx")
-        .await
-        .unwrap();
     let floor_resource = resource_manager
         .request_model("assets/floor.fbx")
         .await
@@ -88,7 +86,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
         .unwrap();
 
     // create level
-    let level = Level::create_dungeon(
+    let mut level = Level::create_dungeon(
         63,
         59,
         RoomOptions {
@@ -122,17 +120,32 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
             scene.graph[handle]
                 .local_transform_mut()
                 .set_scale(Vec3::new(0.2, 0.2, 0.2))
-                .offset(Vec3::new(20.0 * x as f32, 0.0, 20.0 * y as f32));
+                .offset(Vec3::new(
+                    TILE_OFFSET * x as f32,
+                    0.0,
+                    TILE_OFFSET * y as f32,
+                ));
         }
     }
     println!("TILES: {}", tile_count);
 
-    let model_handle = model_resource.instantiate_geometry(&mut scene);
+    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
 
-    scene.graph[model_handle]
-        .local_transform_mut()
-        // Our model is too big, fix it by scale.
-        .set_position(Vec3::new(20.0, 20.0, 20.0));
+    let pl = point_light.with_radius(TILE_OFFSET * 5.0).build_node();
+
+    for room in level.rooms.iter_mut() {
+        room.sort();
+        let pos = room[room.len() / 2];
+        let point_light = scene.graph.add_node(pl.raw_copy());
+
+        scene.graph[point_light]
+            .local_transform_mut()
+            .set_position(Vec3::new(
+                TILE_OFFSET * pos.0 as f32,
+                30.0,
+                TILE_OFFSET * pos.1 as f32,
+            ));
+    }
 
     GameScene {
         scene,
@@ -170,6 +183,17 @@ fn main() {
     engine.resource_manager.state().set_textures_path("assets");
     engine.get_window().set_cursor_visible(false);
 
+    // let vms = engine
+    //     .get_window()
+    //     .current_monitor()
+    //     .video_modes()
+    //     .filter(|vm| vm.size().width >= 640 && vm.size().height >= 480)
+    //     .collect::<Vec<_>>();
+    //
+    // println!("{:?}", vms[0]);
+    //
+    // engine.get_window().set_fullscreen(Some(Fullscreen::Exclusive(vms[0].clone())));
+
     let debug_text = create_ui(&mut engine.user_interface.build_ctx());
 
     let GameScene {
@@ -181,7 +205,7 @@ fn main() {
 
     engine
         .renderer
-        .set_ambient_color(Color::opaque(200, 200, 200));
+        .set_ambient_color(Color::opaque(150, 150, 150));
 
     let clock = Instant::now();
     let fixed_timestep = 1.0 / 60.0;
