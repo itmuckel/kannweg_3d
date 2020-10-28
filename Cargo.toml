@@ -1,13 +1,13 @@
 [package]
 name = "kannweg_3d"
 version = "0.1.0"
-authors = ["itmuckel <michael.bachner@outlook.de>"]
+authors = ["itmuckel <itmuckel@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rg3d = { path = "../rg3d" }
+rg3d = { git = "https://github.com/mrDIMAS/rg3d", rev = "bb44123e94ed9d204c087d268e951f27f7bdda91" }
 rand = "0.7.3"
 num = "0.3.0"
 

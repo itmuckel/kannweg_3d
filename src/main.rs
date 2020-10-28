@@ -41,11 +41,9 @@ fn create_ui(ctx: &mut BuildContext) -> Handle<UiNode> {
     TextBuilder::new(WidgetBuilder::new()).build(ctx)
 }
 
-const PLAYER_SPEED: f32 = 0.7;
-const EXTRA_RUN_SPEED: f32 = 0.7;
+const PLAYER_SPEED: f32 = 0.03;
+const EXTRA_RUN_SPEED: f32 = 0.04;
 const MOUSE_SPEED: f32 = 0.15;
-const TILE_OFFSET: f32 = 20.0;
-const MODEL_SCALE: f32 = 0.2;
 
 struct GameScene {
     scene: Scene,
@@ -82,7 +80,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     scene.graph[camera_handle]
         .local_transform_mut()
-        .offset(Vec3::new(TILE_OFFSET * 25.0, 4.0, TILE_OFFSET * 25.0));
+        .offset(Vec3::new(25.0, 4.0, 25.0));
 
     let floor_resource = resource_manager
         .request_model("assets/floor.fbx")
@@ -101,20 +99,18 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
     // create level
     let mut level = Level::create_dungeon(
         63,
-        59,
+        39,
         RoomOptions {
-            max_rooms: 15,
+            max_rooms: 20,
             max_attempts: 125,
-            min_size: 7,
-            max_size: 15,
+            min_size: 4,
+            max_size: 10,
         },
         Field::Floor,
         Field::Corridor,
     );
 
     let mut tile_count = 0;
-
-    let mut rng = thread_rng();
 
     for x in 0..level.map.len() {
         for y in 0..level.map[0].len() {
@@ -124,30 +120,24 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
             tile_count += 1;
 
-            let handle = match level.map[x][y] {
+            let floor_handle = match level.map[x][y] {
                 Field::Floor => floor_resource.instantiate_geometry(&mut scene),
                 Field::Corridor => corridor_resource.instantiate_geometry(&mut scene),
                 _ => floor_resource.instantiate_geometry(&mut scene), // should be something else...
             };
 
-            if level.map[x][y] == Field::Corridor && rng.gen_bool(0.1) {
-                let handle = scene.graph.add_node(create_point_light(TILE_OFFSET));
-                scene.graph[handle].local_transform_mut().offset(Vec3::new(
-                    TILE_OFFSET * x as f32,
-                    0.0,
-                    TILE_OFFSET * y as f32,
-                ));
+            if level.map[x][y] == Field::Corridor && tile_count % 3 == 0 {
+                let handle = scene.graph.add_node(create_point_light(1.0));
+                scene.graph[handle]
+                    .local_transform_mut()
+                    .offset(Vec3::new(x as f32, 0.3, y as f32));
             }
 
-            scene.graph[handle]
+            scene.graph[floor_handle]
                 .local_transform_mut()
-                .set_scale(Vec3::UNIT.scale(MODEL_SCALE))
-                .offset(Vec3::new(
-                    TILE_OFFSET * x as f32,
-                    0.0,
-                    TILE_OFFSET * y as f32,
-                ));
+                .offset(Vec3::new(x as f32, 0.0, y as f32));
 
+            // create walls
             let neighbours = level
                 .get_neighbours((x, y), 1)
                 .into_iter()
@@ -159,13 +149,8 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
                 let mut add_wall = |rotation: f32| {
                     scene.graph[wall_handle]
                         .local_transform_mut()
-                        .set_scale(Vec3::UNIT.scale(MODEL_SCALE))
                         .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
-                        .offset(Vec3::new(
-                            TILE_OFFSET * x as f32,
-                            0.0,
-                            TILE_OFFSET * y as f32,
-                        ));
+                        .offset(Vec3::new(x as f32, 0.0, y as f32));
                 };
 
                 if n.0 < x {
@@ -182,7 +167,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
     }
     println!("TILES: {}", tile_count);
 
-    let pl = create_point_light(TILE_OFFSET * 5.0);
+    let pl = create_point_light(4.0);
 
     for room in level.rooms.iter_mut() {
         room.sort();
@@ -191,11 +176,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
         scene.graph[point_light]
             .local_transform_mut()
-            .set_position(Vec3::new(
-                TILE_OFFSET * pos.0 as f32,
-                30.0,
-                TILE_OFFSET * pos.1 as f32,
-            ));
+            .set_position(Vec3::new(pos.0 as f32, 1.0, pos.1 as f32));
     }
 
     GameScene {
@@ -224,10 +205,23 @@ fn main() {
 
     let mut engine = GameEngine::new(window_builder, &event_loop).unwrap();
 
-    if let Err(err) = engine
-        .renderer
-        .set_quality_settings(&QualitySettings::ultra())
-    {
+    let quality_settings = QualitySettings {
+        point_shadow_map_size: 512,
+        point_shadows_distance: 10.0,
+        point_shadows_enabled: true,
+        point_soft_shadows: true,
+
+        spot_shadow_map_size: 512,
+        spot_shadows_distance: 10.0,
+        spot_shadows_enabled: true,
+        spot_soft_shadows: true,
+
+        use_ssao: false,
+        ssao_radius: 0.5,
+
+        light_scatter_enabled: false,
+    };
+    if let Err(err) = engine.renderer.set_quality_settings(&quality_settings) {
         panic!("{:?}", err);
     }
 
@@ -254,9 +248,7 @@ fn main() {
 
     let scene_handle = engine.scenes.add(scene);
 
-    engine
-        .renderer
-        .set_ambient_color(Color::opaque(50, 50, 50));
+    engine.renderer.set_ambient_color(Color::opaque(50, 50, 50));
 
     let clock = Instant::now();
     let fixed_timestep = 1.0 / 60.0;
