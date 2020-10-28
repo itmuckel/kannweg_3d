@@ -144,7 +144,7 @@ where
         }
     }
 
-    fn get_neighbours(&self, cell: (usize, usize), distance: usize) -> Vec<(usize, usize)> {
+    pub fn get_neighbours(&self, cell: (usize, usize), distance: usize) -> Vec<(usize, usize)> {
         let x = cell.0;
         let y = cell.1;
 

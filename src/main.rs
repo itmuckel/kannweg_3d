@@ -27,6 +27,7 @@ use rg3d::{
 };
 
 use crate::level_generator::{Field, Level, RoomOptions};
+use rand::{thread_rng, Rng};
 
 mod level_generator;
 
@@ -44,11 +45,18 @@ const PLAYER_SPEED: f32 = 0.7;
 const EXTRA_RUN_SPEED: f32 = 0.7;
 const MOUSE_SPEED: f32 = 0.15;
 const TILE_OFFSET: f32 = 20.0;
+const MODEL_SCALE: f32 = 0.2;
 
 struct GameScene {
     scene: Scene,
     // model_handle: Handle<Node>,
     camera_handle: Handle<Node>,
+}
+
+fn create_point_light(radius: f32) -> Node {
+    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
+
+    point_light.with_radius(radius).build_node()
 }
 
 async fn create_scene(resource_manager: ResourceManager) -> GameScene {
@@ -74,7 +82,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     scene.graph[camera_handle]
         .local_transform_mut()
-        .offset(Vec3::new(TILE_OFFSET * 25.0, 10.0, TILE_OFFSET * 25.0));
+        .offset(Vec3::new(TILE_OFFSET * 25.0, 4.0, TILE_OFFSET * 25.0));
 
     let floor_resource = resource_manager
         .request_model("assets/floor.fbx")
@@ -82,6 +90,11 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
         .unwrap();
     let corridor_resource = resource_manager
         .request_model("assets/corridor.fbx")
+        .await
+        .unwrap();
+
+    let wall_resource = resource_manager
+        .request_model("assets/wall.fbx")
         .await
         .unwrap();
 
@@ -101,7 +114,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     let mut tile_count = 0;
 
-    // let corridors = level.corridors.clone().iter().flat_map(|v| v.iter().cloned()).collect::<Vec<(usize, usize)>>();
+    let mut rng = thread_rng();
 
     for x in 0..level.map.len() {
         for y in 0..level.map[0].len() {
@@ -117,21 +130,59 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
                 _ => floor_resource.instantiate_geometry(&mut scene), // should be something else...
             };
 
+            if level.map[x][y] == Field::Corridor && rng.gen_bool(0.1) {
+                let handle = scene.graph.add_node(create_point_light(TILE_OFFSET));
+                scene.graph[handle].local_transform_mut().offset(Vec3::new(
+                    TILE_OFFSET * x as f32,
+                    0.0,
+                    TILE_OFFSET * y as f32,
+                ));
+            }
+
             scene.graph[handle]
                 .local_transform_mut()
-                .set_scale(Vec3::new(0.2, 0.2, 0.2))
+                .set_scale(Vec3::UNIT.scale(MODEL_SCALE))
                 .offset(Vec3::new(
                     TILE_OFFSET * x as f32,
                     0.0,
                     TILE_OFFSET * y as f32,
                 ));
+
+            let neighbours = level
+                .get_neighbours((x, y), 1)
+                .into_iter()
+                .filter(|&(x, y)| level.map[x][y] == Field::Empty);
+
+            for n in neighbours {
+                let wall_handle = wall_resource.instantiate_geometry(&mut scene);
+
+                let mut add_wall = |rotation: f32| {
+                    scene.graph[wall_handle]
+                        .local_transform_mut()
+                        .set_scale(Vec3::UNIT.scale(MODEL_SCALE))
+                        .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
+                        .offset(Vec3::new(
+                            TILE_OFFSET * x as f32,
+                            0.0,
+                            TILE_OFFSET * y as f32,
+                        ));
+                };
+
+                if n.0 < x {
+                    add_wall(90.0);
+                } else if n.0 > x {
+                    add_wall(-90.0);
+                } else if n.1 < y {
+                    add_wall(0.0);
+                } else if n.1 > y {
+                    add_wall(180.0);
+                }
+            }
         }
     }
     println!("TILES: {}", tile_count);
 
-    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
-
-    let pl = point_light.with_radius(TILE_OFFSET * 5.0).build_node();
+    let pl = create_point_light(TILE_OFFSET * 5.0);
 
     for room in level.rooms.iter_mut() {
         room.sort();
@@ -175,7 +226,7 @@ fn main() {
 
     if let Err(err) = engine
         .renderer
-        .set_quality_settings(&QualitySettings::low())
+        .set_quality_settings(&QualitySettings::ultra())
     {
         panic!("{:?}", err);
     }
@@ -205,7 +256,7 @@ fn main() {
 
     engine
         .renderer
-        .set_ambient_color(Color::opaque(150, 150, 150));
+        .set_ambient_color(Color::opaque(50, 50, 50));
 
     let clock = Instant::now();
     let fixed_timestep = 1.0 / 60.0;
