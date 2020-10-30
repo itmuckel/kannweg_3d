@@ -1,5 +1,6 @@
 use std::cmp::min;
 
+use crate::level_generator::FieldType::{Corridor, Door, Empty};
 use num::{signum, Integer};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
@@ -12,28 +13,68 @@ pub struct RoomOptions {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
-pub enum Field {
+pub enum FieldType {
     Corridor,
     Floor,
+    Door,
     Empty,
+}
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+pub struct Field {
+    pub typ: FieldType,
+    pub walls: WallInfo,
+}
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+pub struct WallInfo {
+    pub up_left: bool,
+    pub up_right: bool,
+    pub right_up: bool,
+    pub right_down: bool,
+    pub down_left: bool,
+    pub down_right: bool,
+    pub left_up: bool,
+    pub left_down: bool,
+}
+
+impl Default for WallInfo {
+    fn default() -> Self {
+        WallInfo {
+            up_left: false,
+            up_right: false,
+            right_up: false,
+            right_down: false,
+            down_left: false,
+            down_right: false,
+            left_up: false,
+            left_down: false,
+        }
+    }
 }
 
 impl Default for Field {
     fn default() -> Self {
-        Field::Empty
+        Field {
+            typ: FieldType::Empty,
+            walls: WallInfo::default(),
+        }
     }
 }
 
-pub struct Level<T: Default + Eq + Copy> {
-    pub rooms: Vec<Vec<(usize, usize)>>,
-    pub corridors: Vec<Vec<(usize, usize)>>,
-    pub map: Vec<Vec<T>>,
+impl Default for FieldType {
+    fn default() -> Self {
+        FieldType::Empty
+    }
 }
 
-impl<T> Level<T>
-where
-    T: Default + Eq + Copy,
-{
+pub struct Level {
+    pub rooms: Vec<Vec<(usize, usize)>>,
+    pub corridors: Vec<Vec<(usize, usize)>>,
+    pub map: Vec<Vec<Field>>,
+}
+
+impl Level {
     pub fn width(&self) -> usize {
         self.map.len()
     }
@@ -42,7 +83,7 @@ where
         self.map[0].len()
     }
 
-    fn init_map(width: usize, height: usize) -> Vec<Vec<T>> {
+    fn init_map(width: usize, height: usize) -> Vec<Vec<Field>> {
         if width.is_even() || height.is_even() {
             panic!(
                 "width and height of map must be odd! width: {}, height: {}",
@@ -50,15 +91,14 @@ where
             );
         }
 
-        vec![vec![T::default(); height]; width]
+        vec![vec![Field::default(); height]; width]
     }
 
     pub fn create_dungeon(
         width: usize,
         height: usize,
         room_options: RoomOptions,
-        room_identifier: T,
-        corridor_identifier: T,
+        room_identifier: FieldType,
     ) -> Self {
         let mut level = Level::create_rooms(
             width,
@@ -70,9 +110,9 @@ where
             room_identifier,
         );
 
-        level.add_maze(corridor_identifier);
+        level.add_maze();
 
-        level.add_doors(corridor_identifier);
+        level.add_doors();
 
         loop {
             let removed = level.remove_dead_ends();
@@ -91,7 +131,7 @@ where
         max_attempts: usize,
         min_size: usize,
         max_size: usize,
-        room_identifier: T,
+        room_identifier: FieldType,
     ) -> Self {
         let mut map = Level::init_map(width, height);
 
@@ -114,7 +154,7 @@ where
                 // try to place the room...
                 for x_check in x..=(x + x_extent) {
                     for y_check in y..=(y + y_extent) {
-                        if map[x_check][y_check] != T::default() {
+                        if map[x_check][y_check].typ != Empty {
                             // field is already taken by another room, try again!
                             continue 'attempts;
                         }
@@ -125,7 +165,7 @@ where
 
                 for x_check in x..=(x + x_extent) {
                     for y_check in y..=(y + y_extent) {
-                        map[x_check][y_check] = room_identifier;
+                        map[x_check][y_check].typ = room_identifier;
                         room_tiles.push((x_check, y_check));
                     }
                 }
@@ -172,7 +212,7 @@ where
     }
 
     /// creates a maze using randomized depth-first search
-    fn add_maze(&mut self, corridor_identifier: T) {
+    fn add_maze(&mut self) {
         let width = self.map.len();
         let height = self.map[0].len();
 
@@ -182,13 +222,13 @@ where
 
         for x in (0..width).filter(Integer::is_odd) {
             for y in (0..height).filter(Integer::is_odd) {
-                if self.map[x][y] != T::default() {
+                if self.map[x][y].typ != FieldType::Empty {
                     continue;
                 }
 
                 let mut visited_cells = Vec::new();
 
-                self.map[x][y] = corridor_identifier;
+                self.map[x][y].typ = FieldType::Corridor;
                 visited_cells.push((x, y));
 
                 let mut corridor = Vec::new();
@@ -206,7 +246,7 @@ where
 
                     let unvisited_neighbours = neighbours
                         .into_iter()
-                        .filter(|(x, y)| self.map[*x][*y] == T::default())
+                        .filter(|(x, y)| self.map[*x][*y].typ == Empty)
                         .collect::<Vec<(usize, usize)>>();
 
                     if unvisited_neighbours.is_empty() {
@@ -229,10 +269,9 @@ where
                     );
 
                     // break in wall
-                    self.map[wall_to_remove.0 as usize][wall_to_remove.1 as usize] =
-                        corridor_identifier;
+                    self.map[wall_to_remove.0 as usize][wall_to_remove.1 as usize].typ = Corridor;
                     // create neighbour cell
-                    self.map[rand_neighbour.0][rand_neighbour.1] = corridor_identifier;
+                    self.map[rand_neighbour.0][rand_neighbour.1].typ = Corridor;
 
                     visited_cells.push(rand_neighbour);
                     corridor.push(rand_neighbour);
@@ -246,7 +285,7 @@ where
         self.corridors = corridors;
     }
 
-    fn add_doors(&mut self, door: T) {
+    fn add_doors(&mut self) {
         let mut regions = Vec::new();
         regions.clone_from(&self.rooms);
         regions.append(&mut self.corridors.clone());
@@ -298,7 +337,7 @@ where
                         return;
                     }
 
-                    self.map[x][y] = door;
+                    self.map[x][y].typ = Door;
                     self.corridors[0].push((x, y));
 
                     let mut region_b_content = regions[region_b.unwrap()].clone();
@@ -331,10 +370,10 @@ where
                 let neighbours = self.get_neighbours(*cur_cell, 1);
                 let neighbour_count = neighbours
                     .iter()
-                    .filter(|(x, y)| self.map[*x][*y] == T::default())
+                    .filter(|(x, y)| self.map[*x][*y].typ == Empty)
                     .count();
                 if neighbour_count == 3 {
-                    self.map[cur_cell.0][cur_cell.1] = T::default();
+                    self.map[cur_cell.0][cur_cell.1].typ = Empty;
                     corridor.remove(l);
                     removed += 1;
                 }

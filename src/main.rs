@@ -26,8 +26,8 @@ use rg3d::{
     utils::translate_event,
 };
 
-use crate::level_generator::{Field, Level, RoomOptions};
-use rand::{thread_rng, Rng};
+use crate::level_generator::{FieldType, Level, RoomOptions};
+use rg3d::scene::Line;
 
 mod level_generator;
 
@@ -47,7 +47,6 @@ const MOUSE_SPEED: f32 = 0.15;
 
 struct GameScene {
     scene: Scene,
-    // model_handle: Handle<Node>,
     camera_handle: Handle<Node>,
 }
 
@@ -55,6 +54,219 @@ fn create_point_light(radius: f32) -> Node {
     let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
 
     point_light.with_radius(radius).build_node()
+}
+
+async fn add_corners(level: &mut Level, scene: &mut Scene, resource_manager: &ResourceManager) {
+    let wall_inner_corner_resource = resource_manager
+        .request_model("assets/wall_inner_corner.fbx")
+        .await
+        .unwrap();
+
+    let wall_outer_corner_resource = resource_manager
+        .request_model("assets/wall_outer_corner.fbx")
+        .await
+        .unwrap();
+
+    for x in 0..level.map.len() {
+        for y in 0..level.map[0].len() {
+            if level.map[x][y].typ == FieldType::Empty {
+                // add outer corners
+                let neighbours = level
+                    .get_neighbours((x, y), 1)
+                    .into_iter()
+                    .filter(|&(x, y)| level.map[x][y].typ != FieldType::Empty)
+                    .collect::<Vec<_>>();
+
+                let mut add_corner = |rotation: f32| {
+                    let corner_handle = wall_outer_corner_resource.instantiate_geometry(scene);
+                    scene.graph[corner_handle]
+                        .local_transform_mut()
+                        .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
+                        .offset(Vec3::new(x as f32, 0.0, y as f32));
+                };
+
+                if neighbours.iter().any(|&(n_x, _)| n_x < x)
+                    && neighbours.iter().any(|&(_, n_y)| n_y < y)
+                {
+                    add_corner(0.0);
+                    level.map[x - 1][y].walls.right_up = true;
+                    level.map[x][y - 1].walls.down_left = true;
+                }
+
+                if neighbours.iter().any(|&(n_x, _)| n_x < x)
+                    && neighbours.iter().any(|&(_, n_y)| n_y > y)
+                {
+                    add_corner(90.0);
+                    level.map[x - 1][y].walls.right_down = true;
+                    level.map[x][y + 1].walls.up_left = true;
+                }
+
+                if neighbours.iter().any(|&(n_x, _)| n_x > x)
+                    && neighbours.iter().any(|&(_, n_y)| n_y < y)
+                {
+                    add_corner(-90.0);
+                    level.map[x + 1][y].walls.left_up = true;
+                    level.map[x][y - 1].walls.down_right = true;
+                }
+
+                if neighbours.iter().any(|&(n_x, _)| n_x > x)
+                    && neighbours.iter().any(|&(_, n_y)| n_y > y)
+                {
+                    add_corner(180.0);
+                    level.map[x + 1][y].walls.left_down = true;
+                    level.map[x][y + 1].walls.up_right = true;
+                }
+
+                continue;
+            }
+
+            // add inner corners
+            let neighbours = level
+                .get_neighbours((x, y), 1)
+                .into_iter()
+                .filter(|&(x, y)| level.map[x][y].typ == FieldType::Empty)
+                .collect::<Vec<_>>();
+
+            let mut add_corner = |rotation: f32| {
+                let corner_handle = wall_inner_corner_resource.instantiate_geometry(scene);
+                scene.graph[corner_handle]
+                    .local_transform_mut()
+                    .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
+                    .offset(Vec3::new(x as f32, 0.0, y as f32));
+            };
+
+            if neighbours.iter().any(|&(n_x, _)| n_x < x)
+                && neighbours.iter().any(|&(_, n_y)| n_y < y)
+            {
+                level.map[x][y].walls.up_left = true;
+                level.map[x][y].walls.left_up = true;
+                add_corner(0.0);
+            }
+
+            if neighbours.iter().any(|&(n_x, _)| n_x > x)
+                && neighbours.iter().any(|&(_, n_y)| n_y < y)
+            {
+                level.map[x][y].walls.up_right = true;
+                level.map[x][y].walls.right_up = true;
+                add_corner(-90.0);
+            }
+
+            if neighbours.iter().any(|&(n_x, _)| n_x < x)
+                && neighbours.iter().any(|&(_, n_y)| n_y > y)
+            {
+                level.map[x][y].walls.down_left = true;
+                level.map[x][y].walls.left_down = true;
+                add_corner(90.0);
+            }
+
+            if neighbours.iter().any(|&(n_x, _)| n_x > x)
+                && neighbours.iter().any(|&(_, n_y)| n_y > y)
+            {
+                level.map[x][y].walls.down_right = true;
+                level.map[x][y].walls.right_down = true;
+                add_corner(180.0);
+            }
+        }
+    }
+}
+
+async fn add_rest(level: &mut Level, scene: &mut Scene, resource_manager: &ResourceManager) {
+    let wall_resource = resource_manager
+        .request_model("assets/wall.fbx")
+        .await
+        .unwrap();
+
+    let floor_resource = resource_manager
+        .request_model("assets/floor.fbx")
+        .await
+        .unwrap();
+
+    let corridor_resource = resource_manager
+        .request_model("assets/corridor.fbx")
+        .await
+        .unwrap();
+
+    let mut tile_count = 0;
+    for x in 0..level.map.len() {
+        for y in 0..level.map[0].len() {
+            if level.map[x][y].typ == FieldType::Empty {
+                continue;
+            }
+
+            tile_count += 1;
+
+            // create floor
+            let floor_handle = match level.map[x][y].typ {
+                FieldType::Floor => floor_resource.instantiate_geometry(scene),
+                FieldType::Corridor => corridor_resource.instantiate_geometry(scene),
+                FieldType::Door => corridor_resource.instantiate_geometry(scene),
+                _ => floor_resource.instantiate_geometry(scene), // should be something else...
+            };
+
+            scene.graph[floor_handle]
+                .local_transform_mut()
+                .offset(Vec3::new(x as f32, 0.0, y as f32));
+
+            // add light to floors
+            if level.map[x][y].typ == FieldType::Corridor && tile_count % 3 == 0 {
+                let handle = scene.graph.add_node(create_point_light(1.0));
+                scene.graph[handle]
+                    .local_transform_mut()
+                    .offset(Vec3::new(x as f32, 0.3, y as f32));
+            }
+
+            // fill in missing walls
+            let add_wall = |scene: &mut Scene, rotation: f32, offset_x: f32, offset_y: f32| {
+                let wall_handle = wall_resource.instantiate_geometry(scene);
+                scene.graph[wall_handle]
+                    .local_transform_mut()
+                    .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
+                    .offset(Vec3::new(x as f32 + offset_x, 0.0, y as f32 + offset_y));
+            };
+
+            let neighbours = level
+                .get_neighbours((x, y), 1)
+                .into_iter()
+                .filter(|(x, y)| level.map[*x][*y].typ == FieldType::Empty)
+                .collect::<Vec<_>>();
+
+            for n in neighbours {
+                let walls = &level.map[x][y].walls;
+                if n.0 < x {
+                    if !walls.left_up {
+                        add_wall(scene, 90.0, 0.0, -0.5);
+                    }
+                    if !walls.left_down {
+                        add_wall(scene, 90.0, 0.0, 0.0);
+                    }
+                }
+                if n.0 > x {
+                    if !walls.right_up {
+                        add_wall(scene, -90.0, 0.0, 0.0);
+                    }
+                    if !walls.right_down {
+                        add_wall(scene, -90.0, 0.0, 0.5);
+                    }
+                }
+                if n.1 < y {
+                    if !walls.up_left {
+                        add_wall(scene, 0.0, 0.0, 0.0);
+                    }
+                    if !walls.up_right {
+                        add_wall(scene, 0.0, 0.5, 0.0);
+                    }
+                }
+                if n.1 > y {
+                    if !walls.down_left {
+                        add_wall(scene, 180.0, -0.5, 0.0);
+                    }
+                    if !walls.down_right {
+                        add_wall(scene, 180.0, 0.0, 0.0);
+                    }
+                }
+            }
+        }
+    }
 }
 
 async fn create_scene(resource_manager: ResourceManager) -> GameScene {
@@ -66,109 +278,25 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
             .with_magnification_filter(TextureMagnificationFilter::Nearest),
     );
 
-    // Camera is our eyes in the world - you won't see anything without it.
-    let camera = CameraBuilder::new(
-        BaseBuilder::new().with_local_transform(
-            TransformBuilder::new()
-                .with_local_position(Vec3::new(0.0, 6.0, -12.0))
-                .build(),
-        ),
-    )
-    .build();
-
-    let camera_handle = scene.graph.add_node(Node::Camera(camera));
-
-    scene.graph[camera_handle]
-        .local_transform_mut()
-        .offset(Vec3::new(25.0, 4.0, 25.0));
-
-    let floor_resource = resource_manager
-        .request_model("assets/floor.fbx")
-        .await
-        .unwrap();
-    let corridor_resource = resource_manager
-        .request_model("assets/corridor.fbx")
-        .await
-        .unwrap();
-
-    let wall_resource = resource_manager
-        .request_model("assets/wall.fbx")
-        .await
-        .unwrap();
-
     // create level
     let mut level = Level::create_dungeon(
-        63,
+        23,
         39,
         RoomOptions {
-            max_rooms: 20,
+            max_rooms: 10,
             max_attempts: 125,
             min_size: 4,
             max_size: 10,
         },
-        Field::Floor,
-        Field::Corridor,
+        FieldType::Floor,
     );
 
-    let mut tile_count = 0;
-
-    for x in 0..level.map.len() {
-        for y in 0..level.map[0].len() {
-            if level.map[x][y] == Field::Empty {
-                continue;
-            }
-
-            tile_count += 1;
-
-            let floor_handle = match level.map[x][y] {
-                Field::Floor => floor_resource.instantiate_geometry(&mut scene),
-                Field::Corridor => corridor_resource.instantiate_geometry(&mut scene),
-                _ => floor_resource.instantiate_geometry(&mut scene), // should be something else...
-            };
-
-            if level.map[x][y] == Field::Corridor && tile_count % 3 == 0 {
-                let handle = scene.graph.add_node(create_point_light(1.0));
-                scene.graph[handle]
-                    .local_transform_mut()
-                    .offset(Vec3::new(x as f32, 0.3, y as f32));
-            }
-
-            scene.graph[floor_handle]
-                .local_transform_mut()
-                .offset(Vec3::new(x as f32, 0.0, y as f32));
-
-            // create walls
-            let neighbours = level
-                .get_neighbours((x, y), 1)
-                .into_iter()
-                .filter(|&(x, y)| level.map[x][y] == Field::Empty);
-
-            for n in neighbours {
-                let wall_handle = wall_resource.instantiate_geometry(&mut scene);
-
-                let mut add_wall = |rotation: f32| {
-                    scene.graph[wall_handle]
-                        .local_transform_mut()
-                        .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
-                        .offset(Vec3::new(x as f32, 0.0, y as f32));
-                };
-
-                if n.0 < x {
-                    add_wall(90.0);
-                } else if n.0 > x {
-                    add_wall(-90.0);
-                } else if n.1 < y {
-                    add_wall(0.0);
-                } else if n.1 > y {
-                    add_wall(180.0);
-                }
-            }
-        }
-    }
-    println!("TILES: {}", tile_count);
+    add_corners(&mut level, &mut scene, &resource_manager).await;
+    add_rest(&mut level, &mut scene, &resource_manager).await;
 
     let pl = create_point_light(4.0);
 
+    // add lights to rooms
     for room in level.rooms.iter_mut() {
         room.sort();
         let pos = room[room.len() / 2];
@@ -178,6 +306,17 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
             .local_transform_mut()
             .set_position(Vec3::new(pos.0 as f32, 1.0, pos.1 as f32));
     }
+
+    let camera = CameraBuilder::new(
+        BaseBuilder::new().with_local_transform(
+            TransformBuilder::new()
+                .with_local_position(Vec3::new(7.0, 0.5, 7.0))
+                .build(),
+        ),
+    )
+    .build();
+
+    let camera_handle = scene.graph.add_node(Node::Camera(camera));
 
     GameScene {
         scene,
@@ -227,17 +366,6 @@ fn main() {
 
     engine.resource_manager.state().set_textures_path("assets");
     engine.get_window().set_cursor_visible(false);
-
-    // let vms = engine
-    //     .get_window()
-    //     .current_monitor()
-    //     .video_modes()
-    //     .filter(|vm| vm.size().width >= 640 && vm.size().height >= 480)
-    //     .collect::<Vec<_>>();
-    //
-    // println!("{:?}", vms[0]);
-    //
-    // engine.get_window().set_fullscreen(Some(Fullscreen::Exclusive(vms[0].clone())));
 
     let debug_text = create_ui(&mut engine.user_interface.build_ctx());
 
@@ -342,6 +470,24 @@ fn main() {
                         MessageDirection::ToWidget,
                         text,
                     ));
+
+                    // for debugging
+                    scene.drawing_context.clear_lines();
+                    scene.drawing_context.add_line(Line {
+                        begin: Vec3::ZERO,
+                        end: Vec3::X.scale(20.0),
+                        color: Color::RED,
+                    });
+                    scene.drawing_context.add_line(Line {
+                        begin: Vec3::ZERO,
+                        end: Vec3::Y.scale(20.0),
+                        color: Color::BLUE,
+                    });
+                    scene.drawing_context.add_line(Line {
+                        begin: Vec3::ZERO,
+                        end: Vec3::Z.scale(20.0),
+                        color: Color::GREEN,
+                    });
 
                     engine.update(fixed_timestep);
                 }
