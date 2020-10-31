@@ -28,8 +28,10 @@ use rg3d::{
 
 use crate::level_generator::{FieldType, Level, RoomOptions};
 use rg3d::scene::Line;
+use crate::sound::start_ambient_sound;
 
 mod level_generator;
+mod sound;
 
 // Create our own engine type aliases. These specializations are needed
 // because engine provides a way to extend UI with custom nodes and messages.
@@ -376,7 +378,9 @@ fn main() {
 
     let scene_handle = engine.scenes.add(scene);
 
-    engine.renderer.set_ambient_color(Color::opaque(50, 50, 50));
+    start_ambient_sound();
+
+    engine.renderer.set_ambient_color(Color::opaque(30, 30, 30));
 
     let clock = Instant::now();
     let fixed_timestep = 1.0 / 60.0;
