@@ -27,10 +27,12 @@ use rg3d::{
 };
 
 use crate::level_generator::{FieldType, Level, RoomOptions};
+use crate::player::Player;
+use crate::sound::{load_footstep_sounds, play_footstep, start_ambient_sound};
 use rg3d::scene::Line;
-use crate::sound::start_ambient_sound;
 
 mod level_generator;
+mod player;
 mod sound;
 
 // Create our own engine type aliases. These specializations are needed
@@ -43,11 +45,8 @@ fn create_ui(ctx: &mut BuildContext) -> Handle<UiNode> {
     TextBuilder::new(WidgetBuilder::new()).build(ctx)
 }
 
-const PLAYER_SPEED: f32 = 0.03;
-const EXTRA_RUN_SPEED: f32 = 0.04;
-const MOUSE_SPEED: f32 = 0.15;
-
 struct GameScene {
+    player: Player,
     scene: Scene,
     camera_handle: Handle<Node>,
 }
@@ -321,6 +320,7 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
     let camera_handle = scene.graph.add_node(Node::Camera(camera));
 
     GameScene {
+        player: Player::default(),
         scene,
         camera_handle,
     }
@@ -372,6 +372,7 @@ fn main() {
     let debug_text = create_ui(&mut engine.user_interface.build_ctx());
 
     let GameScene {
+        mut player,
         scene,
         camera_handle,
     } = rg3d::futures::executor::block_on(create_scene(engine.resource_manager.clone()));
@@ -379,6 +380,9 @@ fn main() {
     let scene_handle = engine.scenes.add(scene);
 
     start_ambient_sound();
+
+    let foot_step =
+        rg3d::futures::executor::block_on(load_footstep_sounds(&mut engine.resource_manager));
 
     engine.renderer.set_ambient_color(Color::opaque(30, 30, 30));
 
@@ -445,10 +449,29 @@ fn main() {
                         offset -= back_front;
                     }
 
-                    let speed = if input_controller.run {
-                        PLAYER_SPEED + EXTRA_RUN_SPEED
+                    if input_controller.move_forward
+                        || input_controller.move_backward
+                        || input_controller.move_left
+                        || input_controller.move_right
+                    {
+                        player.walk();
                     } else {
-                        PLAYER_SPEED
+                        player.stand()
+                    }
+
+                    if input_controller.run {
+                        player.run();
+                    }
+
+                    if player.should_play_step_sound() {
+                        let mut ctx = engine.sound_context.lock().unwrap();
+                        play_footstep(&mut ctx, foot_step.clone(), &player.walk_state)
+                    }
+
+                    let speed = if input_controller.run {
+                        Player::SPEED + Player::EXTRA_RUN_SPEED
+                    } else {
+                        Player::SPEED
                     };
 
                     offset.x *= speed;
@@ -570,8 +593,8 @@ fn main() {
             Event::DeviceEvent { event, .. } => {
                 if let DeviceEvent::MouseMotion { delta } = event {
                     let (dx, dy) = delta;
-                    camera_x += (dx as f32) * MOUSE_SPEED;
-                    camera_y += (dy as f32) * MOUSE_SPEED;
+                    camera_x += (dx as f32) * Player::MOUSE_SPEED;
+                    camera_y += (dy as f32) * Player::MOUSE_SPEED;
 
                     camera_y = min_by(camera_y, 89.0, |a, b| a.partial_cmp(b).unwrap());
                     camera_y = max_by(camera_y, -89.0, |a, b| a.partial_cmp(b).unwrap());

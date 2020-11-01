@@ -40,7 +40,7 @@ pub struct WallInfo {
 
 impl Default for WallInfo {
     fn default() -> Self {
-        WallInfo {
+        Self {
             up_left: false,
             up_right: false,
             right_up: false,
@@ -55,7 +55,7 @@ impl Default for WallInfo {
 
 impl Default for Field {
     fn default() -> Self {
-        Field {
+        Self {
             typ: FieldType::Empty,
             walls: WallInfo::default(),
         }
