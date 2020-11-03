@@ -5,17 +5,16 @@ extern crate rg3d;
 use std::cmp::{max_by, min_by};
 use std::time::Instant;
 
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use rg3d::engine::resource_manager::TextureImportOptions;
 use rg3d::gui::message::MessageDirection;
 use rg3d::renderer::QualitySettings;
 use rg3d::resource::texture::{TextureMagnificationFilter, TextureMinificationFilter};
 use rg3d::scene::light::{BaseLightBuilder, PointLightBuilder};
+use rg3d::scene::Line;
 use rg3d::{
-    core::{
-        color::Color,
-        math::{quat::Quat, vec3::Vec3},
-        pool::Handle,
-    },
+    core::{color::Color, pool::Handle},
     engine::resource_manager::ResourceManager,
     event::{DeviceEvent, ElementState, Event, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -28,8 +27,11 @@ use rg3d::{
 
 use crate::level_generator::{FieldType, Level, RoomOptions};
 use crate::player::Player;
-use crate::sound::{load_footstep_sounds, play_footstep, start_ambient_sound};
-use rg3d::scene::Line;
+use crate::sound::{add_air_vent_sound, load_footstep_sounds, play_footstep, start_ambient_sound};
+use rg3d::futures::executor::block_on;
+use rg3d::physics::na::{UnitQuaternion, Vector3};
+use rg3d::sound::context::Context;
+use std::sync::{Arc, Mutex};
 
 mod level_generator;
 mod player;
@@ -82,8 +84,11 @@ async fn add_corners(level: &mut Level, scene: &mut Scene, resource_manager: &Re
                     let corner_handle = wall_outer_corner_resource.instantiate_geometry(scene);
                     scene.graph[corner_handle]
                         .local_transform_mut()
-                        .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
-                        .offset(Vec3::new(x as f32, 0.0, y as f32));
+                        .set_rotation(UnitQuaternion::from_axis_angle(
+                            &Vector3::y_axis(),
+                            rotation.to_radians(),
+                        ))
+                        .offset(Vector3::new(x as f32, 0.0, y as f32));
                 };
 
                 if neighbours.iter().any(|&(n_x, _)| n_x < x)
@@ -132,8 +137,11 @@ async fn add_corners(level: &mut Level, scene: &mut Scene, resource_manager: &Re
                 let corner_handle = wall_inner_corner_resource.instantiate_geometry(scene);
                 scene.graph[corner_handle]
                     .local_transform_mut()
-                    .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
-                    .offset(Vec3::new(x as f32, 0.0, y as f32));
+                    .set_rotation(UnitQuaternion::from_axis_angle(
+                        &Vector3::y_axis(),
+                        rotation.to_radians(),
+                    ))
+                    .offset(Vector3::new(x as f32, 0.0, y as f32));
             };
 
             if neighbours.iter().any(|&(n_x, _)| n_x < x)
@@ -206,14 +214,14 @@ async fn add_rest(level: &mut Level, scene: &mut Scene, resource_manager: &Resou
 
             scene.graph[floor_handle]
                 .local_transform_mut()
-                .offset(Vec3::new(x as f32, 0.0, y as f32));
+                .offset(Vector3::new(x as f32, 0.0, y as f32));
 
             // add light to floors
             if level.map[x][y].typ == FieldType::Corridor && tile_count % 3 == 0 {
                 let handle = scene.graph.add_node(create_point_light(1.0));
                 scene.graph[handle]
                     .local_transform_mut()
-                    .offset(Vec3::new(x as f32, 0.3, y as f32));
+                    .offset(Vector3::new(x as f32, 0.3, y as f32));
             }
 
             // fill in missing walls
@@ -221,8 +229,11 @@ async fn add_rest(level: &mut Level, scene: &mut Scene, resource_manager: &Resou
                 let wall_handle = wall_resource.instantiate_geometry(scene);
                 scene.graph[wall_handle]
                     .local_transform_mut()
-                    .set_rotation(Quat::from_axis_angle(Vec3::UP, rotation.to_radians()))
-                    .offset(Vec3::new(x as f32 + offset_x, 0.0, y as f32 + offset_y));
+                    .set_rotation(UnitQuaternion::from_axis_angle(
+                        &Vector3::y_axis(),
+                        rotation.to_radians(),
+                    ))
+                    .offset(Vector3::new(x as f32 + offset_x, 0.0, y as f32 + offset_y));
             };
 
             let neighbours = level
@@ -232,37 +243,45 @@ async fn add_rest(level: &mut Level, scene: &mut Scene, resource_manager: &Resou
                 .collect::<Vec<_>>();
 
             for n in neighbours {
-                let walls = &level.map[x][y].walls;
+                let mut walls = &mut level.map[x][y].walls;
                 if n.0 < x {
                     if !walls.left_up {
                         add_wall(scene, 90.0, 0.0, -0.5);
+                        walls.left_up = true;
                     }
                     if !walls.left_down {
                         add_wall(scene, 90.0, 0.0, 0.0);
+                        walls.left_down = true;
                     }
                 }
                 if n.0 > x {
                     if !walls.right_up {
                         add_wall(scene, -90.0, 0.0, 0.0);
+                        walls.right_up = true;
                     }
                     if !walls.right_down {
                         add_wall(scene, -90.0, 0.0, 0.5);
+                        walls.right_down = true;
                     }
                 }
                 if n.1 < y {
                     if !walls.up_left {
                         add_wall(scene, 0.0, 0.0, 0.0);
+                        walls.up_left = true;
                     }
                     if !walls.up_right {
                         add_wall(scene, 0.0, 0.5, 0.0);
+                        walls.up_right = true;
                     }
                 }
                 if n.1 > y {
                     if !walls.down_left {
                         add_wall(scene, 180.0, -0.5, 0.0);
+                        walls.down_left = true;
                     }
                     if !walls.down_right {
                         add_wall(scene, 180.0, 0.0, 0.0);
+                        walls.down_right = true;
                     }
                 }
             }
@@ -270,7 +289,7 @@ async fn add_rest(level: &mut Level, scene: &mut Scene, resource_manager: &Resou
     }
 }
 
-async fn create_scene(resource_manager: ResourceManager) -> GameScene {
+async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>>) -> GameScene {
     let mut scene = Scene::new();
 
     resource_manager.state().set_textures_import_options(
@@ -297,27 +316,92 @@ async fn create_scene(resource_manager: ResourceManager) -> GameScene {
 
     let pl = create_point_light(4.0);
 
-    // add lights to rooms
-    for room in level.rooms.iter_mut() {
+    let air_vent = resource_manager
+        .request_model("assets/air_vent.fbx")
+        .await
+        .unwrap();
+
+    let mut rng = thread_rng();
+
+    for room in &mut level.rooms {
+        // add lights
         room.sort();
         let pos = room[room.len() / 2];
+
         let point_light = scene.graph.add_node(pl.raw_copy());
 
         scene.graph[point_light]
             .local_transform_mut()
-            .set_position(Vec3::new(pos.0 as f32, 1.0, pos.1 as f32));
+            .set_position(Vector3::new(pos.0 as f32, 1.0, pos.1 as f32));
+
+        // add vents
+        room.sort();
+        let (min_x, min_y) = room[0];
+        let (max_x, max_y) = room[room.len() - 1];
+        let edges = room
+            .clone()
+            .into_iter()
+            .filter(|&(x, y)| x == min_x || x == max_x || y == min_y || y == max_y)
+            .collect::<Vec<_>>();
+
+        'attempt: loop {
+            let pos = edges.choose(&mut rng).unwrap();
+
+            let walls = &level.map[pos.0][pos.1].walls;
+
+            let sound_offset: (f32, f32);
+
+            let rot: f32;
+            if walls.up_left {
+                rot = 0.0;
+                sound_offset = (0.0, -0.5);
+            } else if walls.right_up {
+                rot = 270.0;
+                sound_offset = (0.5, 0.0);
+            } else if walls.down_left {
+                rot = 180.0;
+                sound_offset = (0.0, 0.5);
+            } else if walls.left_up {
+                rot = 90.0;
+                sound_offset = (-0.5, 0.0);
+            } else {
+                // no wall!
+                continue 'attempt;
+            }
+
+            let handle = air_vent.instantiate_geometry(&mut scene);
+            scene.graph[handle]
+                .local_transform_mut()
+                .offset(Vector3::new(pos.0 as f32, 0.0, pos.1 as f32))
+                .set_rotation(UnitQuaternion::from_axis_angle(
+                    &Vector3::y_axis(),
+                    rot.to_radians(),
+                ));
+
+            add_air_vent_sound(
+                ctx.clone(),
+                &resource_manager,
+                pos.0 as f32 + sound_offset.0,
+                pos.1 as f32 + sound_offset.1,
+            )
+            .await;
+
+            break 'attempt;
+        }
     }
 
     let camera = CameraBuilder::new(
         BaseBuilder::new().with_local_transform(
             TransformBuilder::new()
-                .with_local_position(Vec3::new(7.0, 0.5, 7.0))
+                .with_local_position(Vector3::new(7.0, 0.5, 7.0))
                 .build(),
         ),
     )
     .build();
 
     let camera_handle = scene.graph.add_node(Node::Camera(camera));
+
+    start_ambient_sound(ctx.clone(), resource_manager.clone()).await;
 
     GameScene {
         player: Player::default(),
@@ -347,10 +431,10 @@ fn main() {
     let mut engine = GameEngine::new(window_builder, &event_loop).unwrap();
 
     let quality_settings = QualitySettings {
-        point_shadow_map_size: 512,
+        point_shadow_map_size: 1024,
         point_shadows_distance: 10.0,
         point_shadows_enabled: true,
-        point_soft_shadows: true,
+        point_soft_shadows: false,
 
         spot_shadow_map_size: 512,
         spot_shadows_distance: 10.0,
@@ -371,18 +455,26 @@ fn main() {
 
     let debug_text = create_ui(&mut engine.user_interface.build_ctx());
 
+    // engine
+    //     .sound_context
+    //     .lock()
+    //     .unwrap()
+    //     .set_renderer(Renderer::HrtfRenderer(HrtfRenderer::new(
+    //         HrirSphere::from_file("assets/IRC_1005_C.bin", context::SAMPLE_RATE).unwrap(),
+    //     )));
+
     let GameScene {
         mut player,
         scene,
         camera_handle,
-    } = rg3d::futures::executor::block_on(create_scene(engine.resource_manager.clone()));
+    } = block_on(create_scene(
+        engine.resource_manager.clone(),
+        engine.sound_context.clone(),
+    ));
 
     let scene_handle = engine.scenes.add(scene);
 
-    start_ambient_sound();
-
-    let foot_step =
-        rg3d::futures::executor::block_on(load_footstep_sounds(&mut engine.resource_manager));
+    let foot_step = block_on(load_footstep_sounds(&mut engine.resource_manager));
 
     engine.renderer.set_ambient_color(Color::opaque(30, 30, 30));
 
@@ -422,19 +514,21 @@ fn main() {
                     scene.graph[camera_handle]
                         .local_transform_mut()
                         .set_rotation(
-                            Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), -camera_x.to_radians())
-                                * Quat::from_axis_angle(
-                                    Vec3::new(1.0, 0.0, 0.0),
-                                    camera_y.to_radians(),
-                                ),
+                            UnitQuaternion::from_axis_angle(
+                                &Vector3::y_axis(),
+                                -camera_x.to_radians(),
+                            ) * &UnitQuaternion::from_axis_angle(
+                                &Vector3::x_axis(),
+                                camera_y.to_radians(),
+                            ),
                         );
 
                     let side = scene.graph[camera_handle].side_vector();
                     let mut back_front = scene.graph[camera_handle].look_vector();
                     back_front.y = 0.0;
-                    back_front = back_front.normalized().unwrap_or(Vec3::ZERO);
+                    back_front = back_front.try_normalize(0.0).unwrap_or(Vector3::default());
 
-                    let mut offset = Vec3::ZERO;
+                    let mut offset = Vector3::default();
 
                     if input_controller.move_right {
                         offset -= side;
@@ -484,10 +578,17 @@ fn main() {
                         offset.y -= speed;
                     }
 
-                    let pos = scene.graph[camera_handle].local_transform().position();
-                    scene.graph[camera_handle]
-                        .local_transform_mut()
-                        .set_position(pos + offset);
+                    let camera = &mut scene.graph[camera_handle];
+
+                    camera.local_transform_mut().offset(offset);
+
+                    // update listener
+                    {
+                        let mut ctx = engine.sound_context.lock().unwrap();
+                        let listener = ctx.listener_mut();
+                        listener.set_position(camera.global_position());
+                        listener.set_orientation_rh(camera.look_vector(), camera.up_vector());
+                    }
 
                     let fps = engine.renderer.get_statistics().frames_per_second;
                     let text = format!("FPS: {}", fps);
@@ -501,18 +602,18 @@ fn main() {
                     // for debugging
                     scene.drawing_context.clear_lines();
                     scene.drawing_context.add_line(Line {
-                        begin: Vec3::ZERO,
-                        end: Vec3::X.scale(20.0),
+                        begin: Vector3::default(),
+                        end: Vector3::x_axis().scale(20.0),
                         color: Color::RED,
                     });
                     scene.drawing_context.add_line(Line {
-                        begin: Vec3::ZERO,
-                        end: Vec3::Y.scale(20.0),
+                        begin: Vector3::default(),
+                        end: Vector3::y_axis().scale(20.0),
                         color: Color::BLUE,
                     });
                     scene.drawing_context.add_line(Line {
-                        begin: Vec3::ZERO,
-                        end: Vec3::Z.scale(20.0),
+                        begin: Vector3::default(),
+                        end: Vector3::z_axis().scale(20.0),
                         color: Color::GREEN,
                     });
 

@@ -26,7 +26,7 @@ pub struct Field {
     pub walls: WallInfo,
 }
 
-#[derive(Eq, PartialEq, Copy, Clone)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub struct WallInfo {
     pub up_left: bool,
     pub up_right: bool,

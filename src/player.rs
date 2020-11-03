@@ -13,7 +13,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub const SPEED: f32 = 0.017;
+    pub const SPEED: f32 = 0.0175;
     pub const EXTRA_RUN_SPEED: f32 = 0.02;
     pub const MOUSE_SPEED: f32 = 0.15;
 
