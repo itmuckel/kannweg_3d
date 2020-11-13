@@ -57,21 +57,23 @@ struct GameScene {
 }
 
 fn create_point_light(radius: f32) -> Node {
-    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
+    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()).with_scatter_enabled(false));
 
     point_light.with_radius(radius).build_node()
 }
 
 fn create_flash_light() -> Node {
     let spot_light = SpotLightBuilder::new(
-        BaseLightBuilder::new(BaseBuilder::new()).with_color(Color::from_rgba(232, 226, 185, 255)),
+        BaseLightBuilder::new(BaseBuilder::new())
+            .with_color(Color::from_rgba(232, 226, 185, 255))
+            .with_scatter_enabled(true),
     );
 
     spot_light
         .with_distance(6.0)
         .with_hotspot_cone_angle(60.0f32.to_radians())
         .with_falloff_angle_delta(12.0f32.to_radians())
-        .with_shadow_bias(0.05)
+        // .with_shadow_bias(0.05)
         .build_node()
 }
 
@@ -497,7 +499,7 @@ fn main() {
         use_ssao: false,
         ssao_radius: 0.5,
 
-        light_scatter_enabled: false,
+        light_scatter_enabled: true,
     };
     if let Err(err) = engine.renderer.set_quality_settings(&quality_settings) {
         panic!("{:?}", err);
@@ -735,8 +737,13 @@ fn main() {
                                     input_controller.crouch = input.state == ElementState::Pressed
                                 }
                                 VirtualKeyCode::F => {
-                                    // let visibility = scene.graph[flash_light_handle].visibility();
-                                    // scene.graph[flash_light_handle].set_visibility(!visibility);
+                                    if input.state == ElementState::Released {
+                                        let scene = &mut engine.scenes[scene_handle];
+                                        let flash_light =
+                                            scene.graph[flash_light_handle].borrow_mut();
+                                        let visibility = flash_light.visibility();
+                                        flash_light.set_visibility(!visibility);
+                                    }
                                 }
                                 VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                                 _ => (),
