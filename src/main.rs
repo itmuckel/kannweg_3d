@@ -11,7 +11,7 @@ use rg3d::engine::resource_manager::TextureImportOptions;
 use rg3d::gui::message::MessageDirection;
 use rg3d::renderer::QualitySettings;
 use rg3d::resource::texture::{TextureMagnificationFilter, TextureMinificationFilter};
-use rg3d::scene::light::{BaseLightBuilder, PointLightBuilder};
+use rg3d::scene::light::{BaseLightBuilder, PointLightBuilder, SpotLightBuilder};
 use rg3d::scene::Line;
 use rg3d::{
     core::{color::Color, pool::Handle},
@@ -31,6 +31,8 @@ use crate::sound::{add_air_vent_sound, load_footstep_sounds, play_footstep, star
 use rg3d::futures::executor::block_on;
 use rg3d::physics::na::{UnitQuaternion, Vector3};
 use rg3d::sound::context::Context;
+use std::any::Any;
+use std::borrow::BorrowMut;
 use std::sync::{Arc, Mutex};
 
 mod level_generator;
@@ -51,12 +53,26 @@ struct GameScene {
     player: Player,
     scene: Scene,
     camera_handle: Handle<Node>,
+    flash_light_handle: Handle<Node>,
 }
 
 fn create_point_light(radius: f32) -> Node {
     let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
 
     point_light.with_radius(radius).build_node()
+}
+
+fn create_flash_light() -> Node {
+    let spot_light = SpotLightBuilder::new(
+        BaseLightBuilder::new(BaseBuilder::new()).with_color(Color::from_rgba(232, 226, 185, 255)),
+    );
+
+    spot_light
+        .with_distance(6.0)
+        .with_hotspot_cone_angle(60.0f32.to_radians())
+        .with_falloff_angle_delta(12.0f32.to_radians())
+        .with_shadow_bias(0.05)
+        .build_node()
 }
 
 async fn add_corners(level: &mut Level, scene: &mut Scene, resource_manager: &ResourceManager) {
@@ -321,6 +337,11 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
         .await
         .unwrap();
 
+    let oxygen_tank = resource_manager
+        .request_model("assets/oxygen.fbx")
+        .await
+        .unwrap();
+
     let mut rng = thread_rng();
 
     for room in &mut level.rooms {
@@ -332,10 +353,9 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
 
         scene.graph[point_light]
             .local_transform_mut()
-            .set_position(Vector3::new(pos.0 as f32, 1.0, pos.1 as f32));
+            .set_position(Vector3::new(pos.0 as f32, 2.0, pos.1 as f32));
 
         // add vents
-        room.sort();
         let (min_x, min_y) = room[0];
         let (max_x, max_y) = room[room.len() - 1];
         let edges = room
@@ -388,6 +408,24 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
 
             break 'attempt;
         }
+
+        let oxygen_tank_pos = room.choose(&mut rng).unwrap();
+
+        let handle = oxygen_tank.instantiate_geometry(&mut scene);
+        scene.graph[handle]
+            .local_transform_mut()
+            .offset(Vector3::new(
+                oxygen_tank_pos.0 as f32,
+                0.0,
+                oxygen_tank_pos.1 as f32,
+            ))
+            .set_rotation(UnitQuaternion::from_axis_angle(
+                &Vector3::y_axis(),
+                [0.0f32, 90.0, 180.0, 270.0]
+                    .choose(&mut rng)
+                    .unwrap()
+                    .to_radians(),
+            ));
     }
 
     let camera = CameraBuilder::new(
@@ -401,12 +439,27 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
 
     let camera_handle = scene.graph.add_node(Node::Camera(camera));
 
+    let camera_pos = scene.graph[camera_handle].global_position();
+
+    let flash_light_handle = scene.graph.add_node(create_flash_light());
+
+    scene.graph[flash_light_handle]
+        .local_transform_mut()
+        .set_rotation(UnitQuaternion::from_axis_angle(
+            &Vector3::x_axis(),
+            -90.0f32.to_radians(),
+        ))
+        .set_position(camera_pos + Vector3::new(-0.3, -0.2, 0.0));
+
+    scene.graph.link_nodes(flash_light_handle, camera_handle);
+
     start_ambient_sound(ctx.clone(), resource_manager.clone()).await;
 
     GameScene {
         player: Player::default(),
         scene,
         camera_handle,
+        flash_light_handle,
     }
 }
 
@@ -434,7 +487,7 @@ fn main() {
         point_shadow_map_size: 1024,
         point_shadows_distance: 10.0,
         point_shadows_enabled: true,
-        point_soft_shadows: false,
+        point_soft_shadows: true,
 
         spot_shadow_map_size: 512,
         spot_shadows_distance: 10.0,
@@ -467,6 +520,7 @@ fn main() {
         mut player,
         scene,
         camera_handle,
+        flash_light_handle,
     } = block_on(create_scene(
         engine.resource_manager.clone(),
         engine.sound_context.clone(),
@@ -476,7 +530,7 @@ fn main() {
 
     let foot_step = block_on(load_footstep_sounds(&mut engine.resource_manager));
 
-    engine.renderer.set_ambient_color(Color::opaque(30, 30, 30));
+    engine.renderer.set_ambient_color(Color::opaque(20, 20, 20));
 
     let clock = Instant::now();
     let fixed_timestep = 1.0 / 60.0;
@@ -591,7 +645,11 @@ fn main() {
                     }
 
                     let fps = engine.renderer.get_statistics().frames_per_second;
-                    let text = format!("FPS: {}", fps);
+                    let text = format!(
+                        "FPS: {} \nDraw Calls: {}",
+                        fps,
+                        engine.renderer.get_statistics().geometry.draw_calls
+                    );
 
                     engine.user_interface.send_message(TextMessage::text(
                         debug_text,
@@ -675,6 +733,10 @@ fn main() {
                                 }
                                 VirtualKeyCode::C => {
                                     input_controller.crouch = input.state == ElementState::Pressed
+                                }
+                                VirtualKeyCode::F => {
+                                    // let visibility = scene.graph[flash_light_handle].visibility();
+                                    // scene.graph[flash_light_handle].set_visibility(!visibility);
                                 }
                                 VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                                 _ => (),
