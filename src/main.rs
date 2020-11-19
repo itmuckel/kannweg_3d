@@ -31,7 +31,6 @@ use crate::sound::{add_air_vent_sound, load_footstep_sounds, play_footstep, star
 use rg3d::futures::executor::block_on;
 use rg3d::physics::na::{UnitQuaternion, Vector3};
 use rg3d::sound::context::Context;
-use std::any::Any;
 use std::borrow::BorrowMut;
 use std::sync::{Arc, Mutex};
 
@@ -57,23 +56,24 @@ struct GameScene {
 }
 
 fn create_point_light(radius: f32) -> Node {
-    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()).with_scatter_enabled(false));
+    let point_light = PointLightBuilder::new(BaseLightBuilder::new(BaseBuilder::new()));
 
     point_light.with_radius(radius).build_node()
 }
 
-fn create_flash_light() -> Node {
+fn create_flash_light(resource_manager: ResourceManager) -> Node {
+    let cookie = resource_manager.request_texture("assets/flashlight_cookie.png");
+
     let spot_light = SpotLightBuilder::new(
-        BaseLightBuilder::new(BaseBuilder::new())
-            .with_color(Color::from_rgba(232, 226, 185, 255))
-            .with_scatter_enabled(true),
+        BaseLightBuilder::new(BaseBuilder::new()).with_color(Color::from_rgba(232, 226, 185, 255)),
     );
 
     spot_light
         .with_distance(6.0)
         .with_hotspot_cone_angle(60.0f32.to_radians())
         .with_falloff_angle_delta(12.0f32.to_radians())
-        // .with_shadow_bias(0.05)
+        .with_shadow_bias(0.0005)
+        .with_cookie_texture(cookie)
         .build_node()
 }
 
@@ -443,7 +443,7 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
 
     let camera_pos = scene.graph[camera_handle].global_position();
 
-    let flash_light_handle = scene.graph.add_node(create_flash_light());
+    let flash_light_handle = scene.graph.add_node(create_flash_light(resource_manager.clone()));
 
     scene.graph[flash_light_handle]
         .local_transform_mut()
@@ -452,6 +452,7 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
             -90.0f32.to_radians(),
         ))
         .set_position(camera_pos + Vector3::new(-0.3, -0.2, 0.0));
+    scene.graph[flash_light_handle].set_visibility(false);
 
     scene.graph.link_nodes(flash_light_handle, camera_handle);
 
@@ -483,7 +484,7 @@ fn main() {
         .with_resizable(true)
         .with_maximized(true);
 
-    let mut engine = GameEngine::new(window_builder, &event_loop).unwrap();
+    let mut engine = GameEngine::new(window_builder, &event_loop, true).unwrap();
 
     let quality_settings = QualitySettings {
         point_shadow_map_size: 1024,
@@ -491,15 +492,15 @@ fn main() {
         point_shadows_enabled: true,
         point_soft_shadows: true,
 
-        spot_shadow_map_size: 512,
+        spot_shadow_map_size: 1024,
         spot_shadows_distance: 10.0,
         spot_shadows_enabled: true,
         spot_soft_shadows: true,
 
-        use_ssao: false,
+        use_ssao: true,
         ssao_radius: 0.5,
 
-        light_scatter_enabled: true,
+        light_scatter_enabled: false,
     };
     if let Err(err) = engine.renderer.set_quality_settings(&quality_settings) {
         panic!("{:?}", err);
