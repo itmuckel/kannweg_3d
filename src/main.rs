@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rg3d::engine::resource_manager::TextureImportOptions;
 use rg3d::gui::message::MessageDirection;
-use rg3d::renderer::QualitySettings;
+use rg3d::renderer::{QualitySettings, ShadowMapPrecision};
 use rg3d::resource::texture::{TextureMagnificationFilter, TextureMinificationFilter};
 use rg3d::scene::light::{BaseLightBuilder, PointLightBuilder, SpotLightBuilder};
 use rg3d::scene::Line;
@@ -430,6 +430,8 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
             ));
     }
 
+    let environment_texture = resource_manager.request_texture("assets/environment.dds");
+
     let camera = CameraBuilder::new(
         BaseBuilder::new().with_local_transform(
             TransformBuilder::new()
@@ -437,13 +439,16 @@ async fn create_scene(resource_manager: ResourceManager, ctx: Arc<Mutex<Context>
                 .build(),
         ),
     )
+    .with_environment(environment_texture)
     .build();
 
     let camera_handle = scene.graph.add_node(Node::Camera(camera));
 
     let camera_pos = scene.graph[camera_handle].global_position();
 
-    let flash_light_handle = scene.graph.add_node(create_flash_light(resource_manager.clone()));
+    let flash_light_handle = scene
+        .graph
+        .add_node(create_flash_light(resource_manager.clone()));
 
     scene.graph[flash_light_handle]
         .local_transform_mut()
@@ -491,11 +496,13 @@ fn main() {
         point_shadows_distance: 10.0,
         point_shadows_enabled: true,
         point_soft_shadows: true,
+        point_shadow_map_precision: ShadowMapPrecision::Half,
 
         spot_shadow_map_size: 1024,
         spot_shadows_distance: 10.0,
         spot_shadows_enabled: true,
         spot_soft_shadows: true,
+        spot_shadow_map_precision: ShadowMapPrecision::Half,
 
         use_ssao: true,
         ssao_radius: 0.5,
